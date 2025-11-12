@@ -40,6 +40,7 @@
 
 import pandas as pd
 import numpy as np
+import sys
 import re
 import warnings
 from openpyxl.utils import get_column_letter
@@ -123,17 +124,25 @@ def process_lesson_files(directory):
     print("\n--- 🚀 Запуск обработки ПОУРОЧНЫХ отчетов (ДЗ) ---")
         
     # --- 1. НАСТРОЙКИ ПОИСКА ---
-    NAME_PATTERN = "*дз*" # Идентификатор для файлов с поурочного отчета
+    #NAME_PATTERN = "*дз*"
     FORMAT       = ".xlsx"
     
     # --- 2. ПОИСК ФАЙЛОВ ДЛЯ ОБРАБОТКИ ---
     # Вызываем общую функцию поиска
-    files_to_process = find_files_to_process(DIRECTORY, NAME_PATTERN, FORMAT)
+    files_to_process = find_files_to_process(DIRECTORY, "*", FORMAT)
+
+    # Строгая фильтрация (Ищет только дз_ или _дз)
+    lesson_files = [f for f in files_to_process 
+                    if os.path.splitext(os.path.basename(f))[0].lower().startswith("дз_") or 
+                       os.path.splitext(os.path.basename(f))[0].lower().endswith("_дз")]
+            
+    files_to_process = lesson_files
     
     if not files_to_process:
-        print(f"❌ Не найдены файлы для обработки с паттерном: '{NAME_PATTERN}{FORMAT}'")
+        print(f"❌ Не найдены файлы, соответствующие шаблону строгой фильтрации в папке '{DIRECTORY}'.")
+        print("   Требуется формат имени файлов: дз_ИМЯ.xlsx или ИМЯ_дз.xlsx")
         # Возвращаем 0 успехов и 0 ошибок, чтобы главный скрипт продолжил работу
-        return 0, 0 
+        return 0, 0, []
     
     print(f"🔍 Найдено {len(files_to_process)} файлов для обработки:")
     for f in files_to_process:
@@ -145,6 +154,7 @@ def process_lesson_files(directory):
     success_count = 0
     error_count = 0
     error_files = []
+    success_files = []
     
     # Весь остальной код будет выполняться для каждого найденного файла с ДЗ
     for input_file in files_to_process:
@@ -215,7 +225,7 @@ def process_lesson_files(directory):
         # --- Статус ДЗ (Обязательная часть) ---
         tasks_obyaz = parse_tasks_from_string(df["Решено задач (обяз)"])
         is_homework_completed = (
-            (tasks_obyaz["solved"] == tasks_obyaz["total"]) | # выполнены все задания или
+            #(tasks_obyaz["solved"] == tasks_obyaz["total"]) | # выполнены все задания или
             #(tasks_obyaz["total"] - tasks_obyaz["solved"] == 1) | # не выполнено всего 1 задание (ЛИШНЕЕ при успеваемости от 0.5)
             ((tasks_obyaz["solved"] / tasks_obyaz["total"]) >= 0.5) # выполнено не менее 50%
         ).fillna(False)
@@ -331,6 +341,7 @@ def process_lesson_files(directory):
                 
             print("✅ Обработка завершена. Результат сохранен в файл:", output_file)
             success_count += 1
+            success_files.append(input_file)
         
         except Exception as e:
             print(f"❌ Ошибка при сохранении файла {output_file}: {e}")
@@ -351,10 +362,10 @@ def process_lesson_files(directory):
     print("==============================================")
     
     # Возвращаем счетчики для финального сводного отчета
-    return success_count, error_count
+    return success_count, error_count, success_files
 
 # ======================================================================
-#            ⬇️ ОБРАБОТКА ОТЧЕТОВ ПО ПРОВЕРОЧНЫМ РАБОТАМ ⬇️
+#           ⬇️ ОБРАБОТКА ОТЧЕТОВ ПО ПРОВЕРОЧНЫМ РАБОТАМ ⬇️
 # ======================================================================
 
 def process_test_files(directory):
@@ -364,27 +375,36 @@ def process_test_files(directory):
     print("\n--- 🚀 Запуск обработки отчетов по ПРОВЕРОЧНЫМ работам ---")
     
     # --- 1. Настройки поиска (ПРОВЕРОЧНЫЕ) ---
-    NAME_PATTERN = "*пр*" # Идентификатор для файлов с проверочными работами
+    #NAME_PATTERN = "*пр*"
     FORMAT       = ".xlsx"
     
     # --- 2. ПОИСК ФАЙЛОВ ---
     # Вызываем общую функцию поиска
-    files_to_process = find_files_to_process(DIRECTORY, NAME_PATTERN, FORMAT)
+    files_to_process = find_files_to_process(DIRECTORY, "*", FORMAT)
+        
+    # Строгая фильтрация (Ищет только пр_ или _пр)
+    test_files = [f for f in files_to_process 
+                  if os.path.splitext(os.path.basename(f))[0].lower().startswith("пр_") or 
+                     os.path.splitext(os.path.basename(f))[0].lower().endswith("_пр")]
     
+    files_to_process = test_files
+        
     if not files_to_process:
-        print(f"❌ Не найдены файлы для обработки с паттерном: '{NAME_PATTERN}{FORMAT}'")
-        # <-- Возвращаем 0 успехов и 0 ошибок
-        return 0, 0 
+        print(f"❌ Не найдены файлы, соответствующие шаблону строгой фильтрации в папке '{DIRECTORY}'.")
+        print("   Требуется формат имени файлов: пр_ИМЯ.xlsx или ИМЯ_пр.xlsx")
+        # Возвращаем 0 успехов и 0 ошибок, чтобы главный скрипт продолжил работу
+        return 0, 0, []
         
     print(f"🔍 Найдено {len(files_to_process)} файлов для обработки:")
     for f in files_to_process:
         print(f"  - {os.path.basename(f)}")
-    
+
     # --- 3. ГЛАВНЫЙ ЦИКЛ ОБРАБОТКИ ---
     # Инициализируем счетчики для итогового отчета
     success_count = 0
     error_count = 0
     error_files = []
+    success_files = []
     
     # Весь код будет выполняться для каждого найденного файла с проверочными
     for input_file in files_to_process:
@@ -503,6 +523,7 @@ def process_test_files(directory):
         
             print(f"✅ Обработка завершена. Результат сохранен в файл: {output_file}")
             success_count += 1
+            success_files.append(input_file)
         
         except Exception as e:
             print(f"❌ Ошибка при сохранении файла {output_file}: {e}")
@@ -523,7 +544,7 @@ def process_test_files(directory):
     print("==============================================")
     
     # Возвращаем счетчики для финального сводного отчета
-    return success_count, error_count
+    return success_count, error_count, success_files
 
 # ======================================================================
 #                      ⬇️ ЗАПУСК ОБРАБОТКИ ⬇️
@@ -531,10 +552,15 @@ def process_test_files(directory):
 
 # Первая строка гарантирует, что код запустится только при запуске файла напрямую
 if __name__ == "__main__":
+    
+    # 0. Список для сбора успешно обработанных файлов
+    files_to_delete = []
     # 1. Запускаем обработку поурочных и "ловим" результат (успех, ошибки)
-    lesson_success, lesson_errors = process_lesson_files(DIRECTORY)
+    lesson_success, lesson_errors, lesson_to_delete = process_lesson_files(DIRECTORY)
+    files_to_delete.extend(lesson_to_delete)
     # 2. Запускаем обработку проверочных и "ловим" результат (успех, ошибки)
-    test_success, test_errors = process_test_files(DIRECTORY)
+    test_success, test_errors, test_to_delete = process_test_files(DIRECTORY)
+    files_to_delete.extend(test_to_delete)
     # 3. Считаем общий итог
     total_success = lesson_success + test_success
     total_errors = lesson_errors + test_errors
@@ -546,9 +572,10 @@ if __name__ == "__main__":
     except ImportError:
         use_bin = False
     
-    if total_errors == 0 and total_success > 0:
+    if total_errors == 0 and files_to_delete:
         print("\n🧹 Ошибок не обнаружено, удаляю исходные файлы...")
-        for file_path in glob.glob(os.path.join(DIRECTORY, "*.xlsx")):
+        
+        for file_path in files_to_delete:
             if "_ОБРАБОТАННЫЙ" not in file_path:
                 try:
                     if use_bin:
@@ -558,7 +585,7 @@ if __name__ == "__main__":
                     print(f"  🗑️ {os.path.basename(file_path)} удалён")
                 except Exception as e:
                     print(f"⚠️ Не удалось удалить {file_path}: {e}")
-    elif total_errors == 0 and total_success == 0:
+    elif total_errors == 0 and not files_to_delete:
         print("\n🧹 Исходные файлы не обнаружены, удалять нечего.")
     else:
         print("\n⚠️ Были ошибки при обработке, исходные файлы сохранены.")
@@ -579,4 +606,14 @@ if __name__ == "__main__":
     print(f"        ❌ Ошибки:  {total_errors}")
     print("==============================================")
     
+    #    БЛОК ПАУЗЫ (только для EXE-файла)
+    IS_FROZEN = hasattr(sys, 'frozen') or hasattr(sys, '_MEIPASS')
     print("\nВся работа ПОЛНОСТЬЮ ЗАВЕРШЕНА.")
+    
+    # Пауза (только если это скомпилированный EXE)
+    if IS_FROZEN:
+        try:
+            input("Нажмите Enter, чтобы закрыть окно.")
+        except EOFError:
+            pass
+# ----------------------------------------
