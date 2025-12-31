@@ -191,7 +191,7 @@ def process_lesson_files(directory):
         
         # 5. ОЧИСТКА И ТРАНСФОРМАЦИЯ ДАННЫХ
         # --- Дисциплина ---
-        df["Дисциплина"] = (
+        df["Дисциплина"] = ("• " +
             df["Дисциплина"].astype(str).str.replace(
                 r"\bШкольн(?:ая|ый|ое)\s+|\..*", "", regex=True, flags=re.IGNORECASE
             ).str.strip().str.capitalize() + ", "
@@ -231,8 +231,8 @@ def process_lesson_files(directory):
         ).fillna(False)
         homework_status = np.select(
             [is_homework_completed, tasks_obyaz["solved"] == 0],
-            [" и выполнено ДЗ с результатом", " и не сделано ДЗ"],
-            default=" и сделана часть ДЗ"
+            [" и выполнено ДЗ с результатом", " и не сделано ДЗ;"],
+            default=" и сделана часть ДЗ;"
         )
         df["Просмотр"] = np.char.add(view_status, homework_status)
         
@@ -290,16 +290,37 @@ def process_lesson_files(directory):
         # 6. ФИНАЛЬНОЕ ФОРМАТИРОВАНИЕ УСПЕШНОСТИ
         success_col = df["_sort_success"]
         is_hw_done = df['_is_hw_completed']
-        is_last_row = df.index == len(df) - 1
+        
+        # Для ВСЕХ выполненных работ пока ставим "; "
         conditions = [
-            success_col.isna(), is_last_row & ~is_hw_done, ~is_hw_done, is_last_row
+            success_col.isna(), # Если нет данных
+            ~is_hw_done         # Если ДЗ не выполнено (долг)
         ]
         choices = [
-            "-", ".", ";", success_col.astype('Int64').astype(str) + "%."
+            "-", 
+            ""
         ]
+        # По умолчанию (если выполнено) -> ставим процент и точку с запятой
         default = success_col.astype('Int64').astype(str) + "%; "
         df["Успешность"] = np.select(conditions, choices, default=default)
         
+        # Точечные исправления знаков препинания
+        if not df.empty:
+            # ИСПРАВЛЕНИЕ ПОСЛЕДНЕГО ПРОЦЕНТА (Успешность)
+            # Находим индекс последней строки, где ДЗ действительно ВЫПОЛНЕНО
+            last_success_idx = df[df['_is_hw_completed']].index.max()
+            # Если такой индекс найден (есть хоть одна оценка), меняем ";" на "."
+            if pd.notna(last_success_idx):
+                current_val = df.loc[last_success_idx, "Успешность"]
+                if isinstance(current_val, str):
+                    df.loc[last_success_idx, "Успешность"] = current_val.replace(' ;', '.').replace(';', '.')
+            # ИСПРАВЛЕНИЕ КОНЦА ТАБЛИЦЫ (Просмотр)
+            # Находим последнюю строку в таблице
+            last_row_idx = df.index[-1]
+            current_view = df.loc[last_row_idx, "Просмотр"]
+            if isinstance(current_view, str):
+                df.loc[last_row_idx, "Просмотр"] = current_view.replace(' ;', '.').replace(';', '.')
+
         # 7. СОХРАНЕНИЕ РЕЗУЛЬТАТА
         # --- Подготовка столбца со средним баллом ---
         # Создаем столбец, который будет отображать средний балл только в первой строке каждой группы
@@ -472,8 +493,11 @@ def process_test_files(directory):
         # Если в названии есть "демонстрационный" (вариант), то это мужской род
         is_masculine = df['lesson_name'].str.contains('демонстрационный', case=False, na=False)
         # Убираем из названия работы упоминание класса
-        df['Название'] = df['lesson_name'].str.replace(r'\s+для\s+\d+\s+класса', '', regex=True)
-        
+        df['Название'] = np.where(
+            is_masculine,
+            "∙ " + df['lesson_name'].str.replace(r'\s+для\s+\d+\s+класса', '', regex=True),
+            "• " + df['lesson_name'].str.replace(r'\s+для\s+\d+\s+класса', '', regex=True),
+        )   
         # Формируем статус с учетом рода 
         status_conditions = [
             is_completed & is_masculine,   # Выполнен (муж)
@@ -514,20 +538,26 @@ def process_test_files(directory):
             'Название', 'Статус', 'Оценка', 'Результат', 'Решено задач', 
             'course_name', 'lesson_date', 'Дата решения'
         ]].copy()
-    
+        final_df.reset_index(drop=True, inplace=True)
+                        
+        # Исправления знаков препинания
         if not final_df.empty:
-            # Находим индекс последней строки и колонки 'Результат'
-            last_row_index = final_df.index[-1]
-            # Цикл для замены точки с запятой на точку в последней строке
-            # Применяем эту логику сразу к двум столбцам: 'Результат' и 'Статус'
-            cols_to_fix = ['Результат', 'Статус']
-            for col in cols_to_fix:
-                if col in final_df.columns:
-                    val = final_df.loc[last_row_index, col]
-                    # Проверяем, что значение является строкой перед заменой
-                    if isinstance(val, str):
-                        # Заменяем " ;" или ";" на "."
-                        final_df.loc[last_row_index, col] = val.replace(' ;', '.').replace(';', '.')
+            # ИСПРАВЛЕНИЕ ПОСЛЕДНЕГО ПРОЦЕНТА (Результат)
+            # Находим индекс последней строки, где ПР действительно сделана
+            valid_indices = final_df[final_df['Результат'] != ''].index            # Если такой индекс найден, меняем ";" на "."
+            if not valid_indices.empty:
+                # Берем самый последний из найденных индексов (последняя сданная работа)
+                last_res_idx = valid_indices[-1]
+                val_res = final_df.loc[last_res_idx, 'Результат']
+                if isinstance(val_res, str):
+                    final_df.loc[last_res_idx, "Результат"] = val_res.replace(' ;', '.').replace(';', '.')
+            # ИСПРАВЛЕНИЕ КОНЦА ТАБЛИЦЫ (Статус)
+            # Находим последнюю строку в таблице
+            last_row_idx = final_df.index[-1]
+            val_stat = final_df.loc[last_row_idx, "Статус"]
+            if isinstance(val_stat, str):
+                final_df.loc[last_row_idx, "Статус"] = val_stat.replace(' ;', '.').replace(';', '.')
+                
         # 9. СОХРАНЕНИЕ РЕЗУЛЬТАТА И АВТОПОДБОР ШИРИНЫ СТОЛБЦОВ
         try:
             with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
